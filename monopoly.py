@@ -1,625 +1,775 @@
-import sys
-import json
-import os
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel, 
-                             QVBoxLayout, QHBoxLayout, QGridLayout, QWidget, 
-                             QStackedWidget, QLineEdit, QMessageBox, QFrame)
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QIcon, QPalette
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monopoly Transactor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --primary-color: #5D5CDE;
+            --secondary-color: #34D399;
+            --error-color: #EF4444;
+            --success-color: #10B981;
+        }
 
-# Constants
-DEFAULT_BALANCE = 1500000  # Default starting balance (1.5M)
-DATA_FILE = "monopoly_cards.json"
-
-class MonopolyTransactor(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        
-        # App state
-        self.current_mode = "idle"  # idle, transfer, bidding, loan
-        self.current_card = None
-        self.sender_card = None
-        self.receiver_card = None
-        self.amount = 0
-        self.base_bid = 0
-        self.current_bid = 0
-        
-        # Load or initialize card data
-        self.load_card_data()
-        
-        # Setup UI
-        self.init_ui()
-        
-    def load_card_data(self):
-        try:
-            if os.path.exists(DATA_FILE):
-                with open(DATA_FILE, 'r') as f:
-                    self.cards = json.load(f)
-            else:
-                # Initialize with default data for two cards
-                self.cards = {
-                    "card1": {
-                        "balance": DEFAULT_BALANCE,
-                        "transactions": 0,
-                        "loans": []
-                    },
-                    "card2": {
-                        "balance": DEFAULT_BALANCE,
-                        "transactions": 0,
-                        "loans": []
-                    }
-                }
-                self.save_card_data()
-        except Exception as e:
-            print(f"Error loading card data: {e}")
-            # Fallback to defaults
-            self.cards = {
-                "card1": {"balance": DEFAULT_BALANCE, "transactions": 0, "loans": []},
-                "card2": {"balance": DEFAULT_BALANCE, "transactions": 0, "loans": []}
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #181818;
+                --text-color: #FFFFFF;
+                --card-bg: #2D2D2D;
+                --button-hover: #4D4CB8;
             }
-    
-    def save_card_data(self):
-        try:
-            with open(DATA_FILE, 'w') as f:
-                json.dump(self.cards, f, indent=4)
-        except Exception as e:
-            print(f"Error saving card data: {e}")
-            
-    def init_ui(self):
-        self.setWindowTitle("Monopoly Transactor")
-        self.setMinimumSize(600, 800)
-        
-        # Main widget and layout
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
-        
-        # Status display area
-        self.status_frame = QFrame()
-        self.status_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.status_frame.setFrameShadow(QFrame.Shadow.Raised)
-        status_layout = QVBoxLayout(self.status_frame)
-        
-        self.mode_label = QLabel("Mode: Idle")
-        self.mode_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.balance_label = QLabel("Balance: -")
-        self.balance_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
-        self.balance_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.message_label = QLabel("Tap a card to begin")
-        self.message_label.setFont(QFont("Arial", 14))
-        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        status_layout.addWidget(self.mode_label)
-        status_layout.addWidget(self.balance_label)
-        status_layout.addWidget(self.message_label)
-        
-        main_layout.addWidget(self.status_frame)
-        
-        # Card simulation buttons
-        card_sim_layout = QHBoxLayout()
-        
-        self.card1_button = QPushButton("Simulate Card 1")
-        self.card1_button.setFont(QFont("Arial", 12))
-        self.card1_button.clicked.connect(lambda: self.simulate_card_tap("card1"))
-        
-        self.card2_button = QPushButton("Simulate Card 2")
-        self.card2_button.setFont(QFont("Arial", 12))
-        self.card2_button.clicked.connect(lambda: self.simulate_card_tap("card2"))
-        
-        card_sim_layout.addWidget(self.card1_button)
-        card_sim_layout.addWidget(self.card2_button)
-        
-        main_layout.addLayout(card_sim_layout)
-        
-        # Mode buttons
-        mode_layout = QHBoxLayout()
-        
-        self.transfer_button = QPushButton("Transfer")
-        self.transfer_button.setFont(QFont("Arial", 12))
-        self.transfer_button.clicked.connect(self.start_transfer_mode)
-        
-        self.bidding_button = QPushButton("Bidding")
-        self.bidding_button.setFont(QFont("Arial", 12))
-        self.bidding_button.clicked.connect(self.start_bidding_mode)
-        
-        self.loan_button = QPushButton("Loan")
-        self.loan_button.setFont(QFont("Arial", 12))
-        self.loan_button.clicked.connect(self.start_loan_mode)
-        
-        self.repay_button = QPushButton("Repay")
-        self.repay_button.setFont(QFont("Arial", 12))
-        self.repay_button.clicked.connect(self.start_repay_mode)
-        
-        mode_layout.addWidget(self.transfer_button)
-        mode_layout.addWidget(self.bidding_button)
-        mode_layout.addWidget(self.loan_button)
-        mode_layout.addWidget(self.repay_button)
-        
-        main_layout.addLayout(mode_layout)
-        
-        # Stacked widget for different input methods
-        self.stacked_widget = QStackedWidget()
-        
-        # Keypad widget
-        keypad_widget = QWidget()
-        keypad_layout = QVBoxLayout(keypad_widget)
-        
-        self.amount_display = QLineEdit()
-        self.amount_display.setReadOnly(True)
-        self.amount_display.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        self.amount_display.setAlignment(Qt.AlignmentFlag.AlignRight)
-        keypad_layout.addWidget(self.amount_display)
-        
-        # Keypad grid
-        keypad_grid = QGridLayout()
-        
-        # Add number buttons
-        for i in range(1, 10):
-            row = (i-1) // 3
-            col = (i-1) % 3
-            button = QPushButton(str(i))
-            button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-            button.setMinimumSize(80, 80)
-            button.clicked.connect(lambda _, digit=i: self.keypad_press(str(digit)))
-            keypad_grid.addWidget(button, row, col)
-        
-        # Add 0, 00, 000 buttons
-        zero_button = QPushButton("0")
-        zero_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        zero_button.setMinimumSize(80, 80)
-        zero_button.clicked.connect(lambda: self.keypad_press("0"))
-        keypad_grid.addWidget(zero_button, 3, 0)
-        
-        double_zero_button = QPushButton("00")
-        double_zero_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        double_zero_button.setMinimumSize(80, 80)
-        double_zero_button.clicked.connect(lambda: self.keypad_press("00"))
-        keypad_grid.addWidget(double_zero_button, 3, 1)
-        
-        triple_zero_button = QPushButton("000")
-        triple_zero_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        triple_zero_button.setMinimumSize(80, 80)
-        triple_zero_button.clicked.connect(lambda: self.keypad_press("000"))
-        keypad_grid.addWidget(triple_zero_button, 3, 2)
-        
-        # Control buttons
-        clear_button = QPushButton("C")
-        clear_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        clear_button.setMinimumSize(80, 80)
-        clear_button.clicked.connect(self.clear_amount)
-        keypad_grid.addWidget(clear_button, 0, 3)
-        
-        backspace_button = QPushButton("⌫")
-        backspace_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        backspace_button.setMinimumSize(80, 80)
-        backspace_button.clicked.connect(self.backspace_amount)
-        keypad_grid.addWidget(backspace_button, 1, 3)
-        
-        self.confirm_button = QPushButton("Confirm")
-        self.confirm_button.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        self.confirm_button.setMinimumSize(80, 170)
-        self.confirm_button.clicked.connect(self.confirm_amount)
-        keypad_grid.addWidget(self.confirm_button, 2, 3, 2, 1)
-        
-        keypad_layout.addLayout(keypad_grid)
-        
-        # Bidding widget
-        bidding_widget = QWidget()
-        bidding_layout = QVBoxLayout(bidding_widget)
-        
-        bid_display_layout = QHBoxLayout()
-        self.bid_display = QLabel("Current Bid: 0")
-        self.bid_display.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        self.bid_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bid_display_layout.addWidget(self.bid_display)
-        
-        bidding_layout.addLayout(bid_display_layout)
-        
-        # Bid increment buttons
-        bid_increment_layout = QGridLayout()
-        
-        increment_values = [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000]
-        
-        for i, value in enumerate(increment_values):
-            display_value = self.format_amount_short(value)
-            row = i // 3
-            col = i % 3
-            button = QPushButton(f"+{display_value}")
-            button.setFont(QFont("Arial", 14))
-            button.setMinimumSize(80, 60)
-            button.clicked.connect(lambda _, v=value: self.add_to_bid(v))
-            bid_increment_layout.addWidget(button, row, col)
-        
-        bidding_layout.addLayout(bid_increment_layout)
-        
-        # Bid control buttons
-        bid_control_layout = QHBoxLayout()
-        
-        bid_clear_button = QPushButton("Clear")
-        bid_clear_button.setFont(QFont("Arial", 14))
-        bid_clear_button.clicked.connect(self.clear_bid)
-        
-        bid_confirm_button = QPushButton("Confirm Bid")
-        bid_confirm_button.setFont(QFont("Arial", 14))
-        bid_confirm_button.clicked.connect(self.confirm_bid)
-        
-        bid_control_layout.addWidget(bid_clear_button)
-        bid_control_layout.addWidget(bid_confirm_button)
-        
-        bidding_layout.addLayout(bid_control_layout)
-        
-        # Add widgets to stacked widget
-        self.stacked_widget.addWidget(keypad_widget)  # Index 0: Keypad
-        self.stacked_widget.addWidget(bidding_widget)  # Index 1: Bidding
-        
-        main_layout.addWidget(self.stacked_widget)
-        
-        # Reset button
-        reset_layout = QHBoxLayout()
-        
-        self.reset_button = QPushButton("Reset Mode")
-        self.reset_button.setFont(QFont("Arial", 12))
-        self.reset_button.clicked.connect(self.reset_to_idle)
-        
-        reset_layout.addStretch()
-        reset_layout.addWidget(self.reset_button)
-        
-        main_layout.addLayout(reset_layout)
-        
-        # Set the central widget
-        self.setCentralWidget(main_widget)
-        
-        # Initially hide the stacked widget
-        self.stacked_widget.setVisible(False)
-    
-    def simulate_card_tap(self, card_id):
-        self.current_card = card_id
-        
-        # Handle the card tap based on the current mode
-        if self.current_mode == "idle":
-            self.display_balance(card_id)
-        elif self.current_mode == "transfer_sender":
-            self.sender_card = card_id
-            self.display_balance(card_id)
-            self.message_label.setText("Enter amount to transfer")
-            self.current_mode = "transfer_amount"
-            self.stacked_widget.setCurrentIndex(0)  # Show keypad
-            self.stacked_widget.setVisible(True)
-            self.clear_amount()
-        elif self.current_mode == "transfer_receiver":
-            self.receiver_card = card_id
-            self.process_transfer()
-        elif self.current_mode == "bidding_card":
-            self.display_balance(card_id)
-            self.message_label.setText("Enter base bid amount")
-            self.current_mode = "bidding_base"
-            self.stacked_widget.setCurrentIndex(0)  # Show keypad
-            self.stacked_widget.setVisible(True)
-            self.clear_amount()
-        elif self.current_mode == "bidding_final":
-            self.process_bid(card_id)
-        elif self.current_mode == "loan_card":
-            self.display_balance(card_id)
-            self.message_label.setText("Enter loan amount")
-            self.current_mode = "loan_amount"
-            self.stacked_widget.setCurrentIndex(0)  # Show keypad
-            self.stacked_widget.setVisible(True)
-            self.clear_amount()
-        elif self.current_mode == "repay_card":
-            self.process_repayment(card_id)
-    
-    def display_balance(self, card_id):
-        card_data = self.cards[card_id]
-        balance = card_data["balance"]
-        transactions = card_data["transactions"]
-        
-        formatted_balance = self.format_amount(balance)
-        self.balance_label.setText(f"Balance: {formatted_balance}")
-        
-        if transactions > 0:
-            self.message_label.setText(f"Please repay {transactions}")
-        else:
-            self.message_label.setText(f"Card {card_id[-1]} - Ready")
-    
-    def format_amount(self, amount):
-        if amount >= 1000000:
-            return f"{amount/1000000:.2f}M".rstrip('0').rstrip('.') + "M"
-        elif amount >= 1000:
-            return f"{amount/1000:.2f}K".rstrip('0').rstrip('.') + "K"
-        else:
-            return str(amount)
-    
-    def format_amount_short(self, amount):
-        if amount >= 1000000:
-            return f"{int(amount/1000000)}M"
-        elif amount >= 1000:
-            return f"{int(amount/1000)}K"
-        else:
-            return str(amount)
-    
-    def keypad_press(self, digit):
-        current_text = self.amount_display.text().replace(",", "")
-        
-        # Prevent adding too many digits
-        if len(current_text) > 8:
-            return
-            
-        new_amount = current_text + digit
-        formatted_amount = self.format_display_amount(new_amount)
-        self.amount_display.setText(formatted_amount)
-    
-    def format_display_amount(self, amount_str):
-        # Remove any non-digit characters
-        clean_amount = ''.join(c for c in amount_str if c.isdigit())
-        
-        # Convert to integer
-        if clean_amount:
-            amount = int(clean_amount)
-            # Use locale to format with commas
-            return f"{amount:,}"
-        return ""
-    
-    def clear_amount(self):
-        self.amount_display.setText("")
-    
-    def backspace_amount(self):
-        current_text = self.amount_display.text().replace(",", "")
-        if current_text:
-            new_text = current_text[:-1]
-            formatted_amount = self.format_display_amount(new_text)
-            self.amount_display.setText(formatted_amount)
-    
-    def confirm_amount(self):
-        try:
-            amount_text = self.amount_display.text().replace(",", "")
-            
-            if not amount_text:
-                self.message_label.setText("Please enter an amount")
-                return
-                
-            amount = int(amount_text)
-            
-            if amount <= 0:
-                self.message_label.setText("Amount must be greater than 0")
-                return
-            
-            if self.current_mode == "transfer_amount":
-                # Check if sender has enough funds
-                if amount > self.cards[self.sender_card]["balance"]:
-                    self.message_label.setText("Insufficient funds")
-                    return
-                    
-                self.amount = amount
-                self.message_label.setText("Tap receiver's card")
-                self.current_mode = "transfer_receiver"
-                self.stacked_widget.setVisible(False)
-                
-            elif self.current_mode == "bidding_base":
-                self.base_bid = amount
-                self.current_bid = amount
-                self.bid_display.setText(f"Current Bid: {self.format_amount(amount)}")
-                self.message_label.setText("Adjust bid with increments")
-                self.current_mode = "bidding_increment"
-                self.stacked_widget.setCurrentIndex(1)  # Show bidding widget
-                
-            elif self.current_mode == "loan_amount":
-                self.amount = amount
-                self.process_loan()
-                
-        except ValueError:
-            self.message_label.setText("Invalid amount")
-    
-    def start_transfer_mode(self):
-        self.reset_to_idle()
-        self.current_mode = "transfer_sender"
-        self.mode_label.setText("Mode: Transfer")
-        self.message_label.setText("Tap sender's card")
-    
-    def start_bidding_mode(self):
-        self.reset_to_idle()
-        self.current_mode = "bidding_card"
-        self.mode_label.setText("Mode: Bidding")
-        self.message_label.setText("Tap card of bidder")
-    
-    def start_loan_mode(self):
-        self.reset_to_idle()
-        self.current_mode = "loan_card"
-        self.mode_label.setText("Mode: Loan")
-        self.message_label.setText("Tap card to receive loan")
-    
-    def start_repay_mode(self):
-        self.reset_to_idle()
-        self.current_mode = "repay_card"
-        self.mode_label.setText("Mode: Repay")
-        self.message_label.setText("Tap card to repay loan")
-    
-    def process_transfer(self):
-        if self.sender_card == self.receiver_card:
-            self.message_label.setText("Cannot transfer to the same card")
-            return
-            
-        try:
-            # Deduct from sender
-            self.cards[self.sender_card]["balance"] -= self.amount
-            
-            # Add to receiver
-            self.cards[self.receiver_card]["balance"] += self.amount
-            
-            # Display the new balance of the receiver
-            self.display_balance(self.receiver_card)
-            
-            # Update message
-            sender_card_num = self.sender_card[-1]
-            receiver_card_num = self.receiver_card[-1]
-            amount_str = self.format_amount(self.amount)
-            self.message_label.setText(f"Transferred {amount_str} from Card {sender_card_num} to Card {receiver_card_num}")
-            
-            # Save changes
-            self.save_card_data()
-            
-            # Reset after a short delay
-            QTimer.singleShot(3000, self.reset_to_idle)
-            
-        except Exception as e:
-            self.message_label.setText(f"Error: {str(e)}")
-    
-    def add_to_bid(self, increment):
-        self.current_bid += increment
-        self.bid_display.setText(f"Current Bid: {self.format_amount(self.current_bid)}")
-    
-    def clear_bid(self):
-        self.current_bid = self.base_bid
-        self.bid_display.setText(f"Current Bid: {self.format_amount(self.base_bid)}")
-    
-    def confirm_bid(self):
-        if self.current_bid <= 0:
-            self.message_label.setText("Bid must be greater than 0")
-            return
-            
-        self.message_label.setText("Tap card to confirm and pay bid")
-        self.current_mode = "bidding_final"
-        self.stacked_widget.setVisible(False)
-    
-    def process_bid(self, card_id):
-        try:
-            # Check if card has enough funds
-            if self.current_bid > self.cards[card_id]["balance"]:
-                self.message_label.setText("Insufficient funds for bid")
-                return
-                
-            # Deduct bid amount from card
-            self.cards[card_id]["balance"] -= self.current_bid
-            
-            # Increment transactions counter
-            self.cards[card_id]["transactions"] += 1
-            
-            # Display the new balance
-            self.display_balance(card_id)
-            
-            # Update message
-            amount_str = self.format_amount(self.current_bid)
-            self.message_label.setText(f"Bid of {amount_str} paid successfully")
-            
-            # Save changes
-            self.save_card_data()
-            
-            # Reset after a short delay
-            QTimer.singleShot(3000, self.reset_to_idle)
-            
-        except Exception as e:
-            self.message_label.setText(f"Error: {str(e)}")
-    
-    def process_loan(self):
-        try:
-            # Add loan amount to card
-            self.cards[self.current_card]["balance"] += self.amount
-            
-            # Store loan information
-            self.cards[self.current_card]["loans"].append({
-                "amount": self.amount,
-                "paid": False
-            })
-            
-            # Display the new balance
-            self.display_balance(self.current_card)
-            
-            # Update message
-            amount_str = self.format_amount(self.amount)
-            self.message_label.setText(f"Loan of {amount_str} added successfully")
-            
-            # Save changes
-            self.save_card_data()
-            
-            # Reset after a short delay
-            QTimer.singleShot(3000, self.reset_to_idle)
-            
-        except Exception as e:
-            self.message_label.setText(f"Error: {str(e)}")
-    
-    def process_repayment(self, card_id):
-        try:
-            card_data = self.cards[card_id]
-            transactions = card_data["transactions"]
-            
-            if transactions == 0:
-                self.message_label.setText("No loans to repay")
-                return
-                
-            # Calculate interest (5% base + 1% per transaction after the first)
-            interest_rate = 0.05
-            if transactions > 1:
-                interest_rate += (transactions - 1) * 0.01
-                
-            # Find unpaid loans
-            unpaid_loans = [loan for loan in card_data["loans"] if not loan["paid"]]
-            
-            if not unpaid_loans:
-                self.message_label.setText("No unpaid loans found")
-                return
-                
-            # Calculate total repayment amount
-            loan_total = sum(loan["amount"] for loan in unpaid_loans)
-            interest_amount = loan_total * interest_rate
-            total_repayment = loan_total + int(interest_amount)
-            
-            # Check if card has enough balance
-            if total_repayment > card_data["balance"]:
-                self.message_label.setText("Insufficient funds to repay loans")
-                return
-                
-            # Deduct repayment amount
-            card_data["balance"] -= total_repayment
-            
-            # Mark loans as paid
-            for loan in unpaid_loans:
-                loan["paid"] = True
-                
-            # Reset transaction counter
-            card_data["transactions"] = 0
-            
-            # Display the new balance
-            self.display_balance(card_id)
-            
-            # Update message
-            repayment_str = self.format_amount(total_repayment)
-            interest_str = self.format_amount(int(interest_amount))
-            self.message_label.setText(f"Repaid {repayment_str} (incl. {interest_str} interest)")
-            
-            # Save changes
-            self.save_card_data()
-            
-            # Reset after a short delay
-            QTimer.singleShot(3000, self.reset_to_idle)
-            
-        except Exception as e:
-            self.message_label.setText(f"Error: {str(e)}")
-    
-    def reset_to_idle(self):
-        self.current_mode = "idle"
-        self.mode_label.setText("Mode: Idle")
-        self.message_label.setText("Tap a card to begin")
-        self.balance_label.setText("Balance: -")
-        self.stacked_widget.setVisible(False)
-        self.sender_card = None
-        self.receiver_card = None
-        self.amount = 0
-        self.base_bid = 0
-        self.current_bid = 0
-        self.current_card = None
+        }
 
-def main():
-    app = QApplication(sys.argv)
-    
-    # Set application style
-    app.setStyle("Fusion")
-    
-    # Create and show the main window
-    window = MonopolyTransactor()
-    window.show()
-    
-    sys.exit(app.exec())
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg-color: #FFFFFF;
+                --text-color: #181818;
+                --card-bg: #F3F4F6;
+                --button-hover: #4D4CB8;
+            }
+        }
 
-if __name__ == "__main__":
-    main()
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Arial', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn {
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .btn:hover {
+            background-color: var(--button-hover);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .numpad-btn {
+            width: 3.5rem;
+            height: 3.5rem;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.5rem;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .numpad-btn:hover {
+            background-color: var(--button-hover);
+            color: white;
+        }
+
+        .numpad-btn:active {
+            transform: scale(0.95);
+        }
+
+        .loader {
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 3px solid var(--primary-color);
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <div class="container mx-auto max-w-2xl">
+        <!-- Header -->
+        <div class="text-center mb-6">
+            <h1 class="text-3xl md:text-4xl font-bold mb-2">Monopoly Transactor</h1>
+            <p class="text-sm md:text-base opacity-75" id="version">v1.0 - RFID Simulation</p>
+        </div>
+
+        <!-- Status Display -->
+        <div class="card p-4 md:p-6 mb-6 text-center">
+            <h2 class="text-xl font-semibold mb-2" id="mode-display">Mode: Idle</h2>
+            <div class="text-3xl md:text-4xl font-bold my-3" id="balance-display">Balance: -</div>
+            <div class="text-md md:text-lg my-2" id="message-display">Tap a card to begin</div>
+        </div>
+
+        <!-- Card Simulation Buttons -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <button id="card1-btn" class="card p-4 py-5 text-center btn bg-primary-100 hover:bg-primary-200 active:bg-primary-300" style="background-color: var(--primary-color); color: white;">
+                Simulate Card 1
+            </button>
+            <button id="card2-btn" class="card p-4 py-5 text-center btn bg-secondary-100 hover:bg-secondary-200 active:bg-secondary-300" style="background-color: var(--secondary-color); color: white;">
+                Simulate Card 2
+            </button>
+        </div>
+
+        <!-- Mode Buttons -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <button id="transfer-btn" class="card p-3 md:p-4 text-center btn hover:bg-gray-200 dark:hover:bg-gray-700">
+                Transfer
+            </button>
+            <button id="bidding-btn" class="card p-3 md:p-4 text-center btn hover:bg-gray-200 dark:hover:bg-gray-700">
+                Bidding
+            </button>
+            <button id="loan-btn" class="card p-3 md:p-4 text-center btn hover:bg-gray-200 dark:hover:bg-gray-700">
+                Loan
+            </button>
+            <button id="repay-btn" class="card p-3 md:p-4 text-center btn hover:bg-gray-200 dark:hover:bg-gray-700">
+                Repay
+            </button>
+        </div>
+
+        <!-- Input Area (Initially Hidden) -->
+        <div id="input-area" class="mb-6 hidden fade-in">
+            <!-- Keypad Input -->
+            <div id="keypad-container" class="card p-4 md:p-6">
+                <div class="bg-gray-100 dark:bg-gray-800 p-3 rounded mb-4 text-right text-2xl md:text-3xl font-mono" id="amount-display">0</div>
+                
+                <div class="grid grid-cols-3 gap-2 mb-3">
+                    <div class="numpad-btn">1</div>
+                    <div class="numpad-btn">2</div>
+                    <div class="numpad-btn">3</div>
+                    <div class="numpad-btn">4</div>
+                    <div class="numpad-btn">5</div>
+                    <div class="numpad-btn">6</div>
+                    <div class="numpad-btn">7</div>
+                    <div class="numpad-btn">8</div>
+                    <div class="numpad-btn">9</div>
+                    <div class="numpad-btn">0</div>
+                    <div class="numpad-btn">00</div>
+                    <div class="numpad-btn">000</div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="clear-btn" class="flex-1 py-3 bg-red-500 text-white rounded hover:bg-red-600 active:bg-red-700">Clear</button>
+                    <button id="backspace-btn" class="py-3 px-4 bg-gray-300 dark:bg-gray-700 rounded hover:bg-gray-400 dark:hover:bg-gray-600">⌫</button>
+                    <button id="confirm-amount-btn" class="flex-1 py-3 bg-green-500 text-white rounded hover:bg-green-600 active:bg-green-700">Confirm</button>
+                </div>
+            </div>
+
+            <!-- Bidding Controls -->
+            <div id="bidding-container" class="card p-4 md:p-6 hidden">
+                <div class="text-2xl font-bold text-center mb-4" id="current-bid-display">Current Bid: $0</div>
+                
+                <div class="grid grid-cols-3 gap-2 mb-4">
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="100">+$100</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="500">+$500</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="1000">+$1K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="5000">+$5K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="10000">+$10K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="50000">+$50K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="100000">+$100K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="500000">+$500K</button>
+                    <button class="bid-increment p-2 bg-blue-100 dark:bg-blue-900 rounded hover:bg-blue-200 dark:hover:bg-blue-800" data-value="1000000">+$1M</button>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="reset-bid-btn" class="flex-1 py-3 bg-gray-300 dark:bg-gray-700 rounded hover:bg-gray-400 dark:hover:bg-gray-600">Reset</button>
+                    <button id="confirm-bid-btn" class="flex-1 py-3 bg-green-500 text-white rounded hover:bg-green-600 active:bg-green-700">Confirm Bid</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reset Button -->
+        <div class="text-center mb-6">
+            <button id="reset-btn" class="px-4 py-2 rounded text-white" style="background-color: var(--primary-color);">
+                Reset
+            </button>
+        </div>
+
+        <!-- Notification -->
+        <div id="notification" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-lg hidden bg-green-500 text-white">
+            Operation successful!
+        </div>
+    </div>
+
+    <script>
+        // Card Data Management
+        const DEFAULT_BALANCE = 1500000; // 1.5M
+        let cards = {};
+        
+        // Initialize or load saved data
+        function initializeCardData() {
+            const savedData = localStorage.getItem('monopolyCards');
+            if (savedData) {
+                try {
+                    cards = JSON.parse(savedData);
+                } catch (e) {
+                    console.error("Error loading card data:", e);
+                    resetCardData();
+                }
+            } else {
+                resetCardData();
+            }
+        }
+        
+        function resetCardData() {
+            cards = {
+                "card1": {
+                    balance: DEFAULT_BALANCE,
+                    transactions: 0,
+                    loans: []
+                },
+                "card2": {
+                    balance: DEFAULT_BALANCE,
+                    transactions: 0,
+                    loans: []
+                }
+            };
+            saveCardData();
+        }
+        
+        function saveCardData() {
+            try {
+                localStorage.setItem('monopolyCards', JSON.stringify(cards));
+            } catch (e) {
+                console.error("Error saving card data:", e);
+                showNotification("Error saving data", "error");
+            }
+        }
+        
+        // App State
+        let currentMode = "idle";
+        let currentCard = null;
+        let senderCard = null;
+        let receiverCard = null;
+        let amount = 0;
+        let baseBid = 0;
+        let currentBid = 0;
+        
+        // UI Element References
+        const modeDisplay = document.getElementById('mode-display');
+        const balanceDisplay = document.getElementById('balance-display');
+        const messageDisplay = document.getElementById('message-display');
+        const amountDisplay = document.getElementById('amount-display');
+        const currentBidDisplay = document.getElementById('current-bid-display');
+        const inputArea = document.getElementById('input-area');
+        const keypadContainer = document.getElementById('keypad-container');
+        const biddingContainer = document.getElementById('bidding-container');
+        const notification = document.getElementById('notification');
+        
+        // Format Currency Functions
+        function formatAmount(amount) {
+            if (amount >= 1000000) {
+                return `$${(amount/1000000).toFixed(2).replace(/\.00$/, '')}M`;
+            } else if (amount >= 1000) {
+                return `$${(amount/1000).toFixed(2).replace(/\.00$/, '')}K`;
+            } else {
+                return `$${amount}`;
+            }
+        }
+        
+        function formatDisplayAmount(amountStr) {
+            // Format for display in the amount input
+            if (!amountStr || amountStr === '0') return '0';
+            
+            const num = parseInt(amountStr.replace(/,/g, ''));
+            return num.toLocaleString();
+        }
+        
+        // UI Update Functions
+        function updateModeDisplay(mode) {
+            modeDisplay.textContent = `Mode: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`;
+        }
+        
+        function updateBalanceDisplay(balance) {
+            balanceDisplay.textContent = balance ? `Balance: ${formatAmount(balance)}` : 'Balance: -';
+        }
+        
+        function updateMessageDisplay(message) {
+            messageDisplay.textContent = message;
+        }
+        
+        function showInputArea(type = 'keypad') {
+            inputArea.classList.remove('hidden');
+            
+            if (type === 'keypad') {
+                keypadContainer.classList.remove('hidden');
+                biddingContainer.classList.add('hidden');
+                amountDisplay.textContent = '0';
+            } else if (type === 'bidding') {
+                keypadContainer.classList.add('hidden');
+                biddingContainer.classList.remove('hidden');
+                currentBidDisplay.textContent = `Current Bid: ${formatAmount(currentBid)}`;
+            }
+        }
+        
+        function hideInputArea() {
+            inputArea.classList.add('hidden');
+        }
+        
+        function showNotification(message, type = 'success') {
+            notification.textContent = message;
+            
+            if (type === 'error') {
+                notification.classList.remove('bg-green-500');
+                notification.classList.add('bg-red-500');
+            } else {
+                notification.classList.remove('bg-red-500');
+                notification.classList.add('bg-green-500');
+            }
+            
+            notification.classList.remove('hidden');
+            
+            setTimeout(() => {
+                notification.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // Card Interaction Functions
+        function simulateCardTap(cardId) {
+            currentCard = cardId;
+            
+            switch(currentMode) {
+                case 'idle':
+                    displayCardInfo(cardId);
+                    break;
+                case 'transfer_sender':
+                    senderCard = cardId;
+                    displayCardInfo(cardId);
+                    updateMessageDisplay('Enter amount to transfer');
+                    currentMode = 'transfer_amount';
+                    showInputArea('keypad');
+                    break;
+                case 'transfer_receiver':
+                    receiverCard = cardId;
+                    processTransfer();
+                    break;
+                case 'bidding_card':
+                    displayCardInfo(cardId);
+                    updateMessageDisplay('Enter base bid amount');
+                    currentMode = 'bidding_base';
+                    showInputArea('keypad');
+                    break;
+                case 'bidding_final':
+                    processBid(cardId);
+                    break;
+                case 'loan_card':
+                    displayCardInfo(cardId);
+                    updateMessageDisplay('Enter loan amount');
+                    currentMode = 'loan_amount';
+                    showInputArea('keypad');
+                    break;
+                case 'repay_card':
+                    processRepayment(cardId);
+                    break;
+            }
+        }
+        
+        function displayCardInfo(cardId) {
+            const card = cards[cardId];
+            updateBalanceDisplay(card.balance);
+            
+            if (card.transactions > 0) {
+                updateMessageDisplay(`Please repay ${card.transactions}`);
+            } else {
+                updateMessageDisplay(`Card ${cardId.slice(-1)} - Ready`);
+            }
+        }
+        
+        // Process Functions
+        function processTransfer() {
+            if (senderCard === receiverCard) {
+                updateMessageDisplay('Cannot transfer to the same card');
+                showNotification('Cannot transfer to the same card', 'error');
+                return;
+            }
+            
+            try {
+                // Check for sufficient funds
+                if (amount > cards[senderCard].balance) {
+                    updateMessageDisplay('Insufficient funds for transfer');
+                    showNotification('Insufficient funds', 'error');
+                    return;
+                }
+                
+                // Perform the transfer
+                cards[senderCard].balance -= amount;
+                cards[receiverCard].balance += amount;
+                
+                // Update display
+                displayCardInfo(receiverCard);
+                
+                // Show notification
+                const amountStr = formatAmount(amount);
+                showNotification(`Transferred ${amountStr} successfully`);
+                updateMessageDisplay(`Transferred ${amountStr} from Card ${senderCard.slice(-1)} to Card ${receiverCard.slice(-1)}`);
+                
+                // Save data
+                saveCardData();
+                
+                // Reset after delay
+                setTimeout(resetToIdle, 3000);
+                
+            } catch (error) {
+                console.error("Transfer error:", error);
+                updateMessageDisplay('Error processing transfer');
+                showNotification('Error processing transfer', 'error');
+            }
+        }
+        
+        function processBid(cardId) {
+            try {
+                // Check for sufficient funds
+                if (currentBid > cards[cardId].balance) {
+                    updateMessageDisplay('Insufficient funds for bid');
+                    showNotification('Insufficient funds', 'error');
+                    return;
+                }
+                
+                // Deduct bid amount
+                cards[cardId].balance -= currentBid;
+                
+                // Increment transactions counter
+                cards[cardId].transactions += 1;
+                
+                // Update display
+                displayCardInfo(cardId);
+                
+                // Show notification
+                const bidStr = formatAmount(currentBid);
+                showNotification(`Bid of ${bidStr} paid successfully`);
+                
+                // Save data
+                saveCardData();
+                
+                // Reset after delay
+                setTimeout(resetToIdle, 3000);
+                
+            } catch (error) {
+                console.error("Bid error:", error);
+                updateMessageDisplay('Error processing bid');
+                showNotification('Error processing bid', 'error');
+            }
+        }
+        
+        function processLoan() {
+            try {
+                // Add loan amount to card
+                cards[currentCard].balance += amount;
+                
+                // Store loan information
+                cards[currentCard].loans.push({
+                    amount: amount,
+                    paid: false,
+                    timestamp: Date.now()
+                });
+                
+                // Update display
+                displayCardInfo(currentCard);
+                
+                // Show notification
+                const amountStr = formatAmount(amount);
+                showNotification(`Loan of ${amountStr} added successfully`);
+                updateMessageDisplay(`Loan of ${amountStr} added to Card ${currentCard.slice(-1)}`);
+                
+                // Save data
+                saveCardData();
+                
+                // Reset after delay
+                setTimeout(resetToIdle, 3000);
+                
+            } catch (error) {
+                console.error("Loan error:", error);
+                updateMessageDisplay('Error processing loan');
+                showNotification('Error processing loan', 'error');
+            }
+        }
+        
+        function processRepayment(cardId) {
+            try {
+                const card = cards[cardId];
+                const transactions = card.transactions;
+                
+                if (transactions === 0) {
+                    updateMessageDisplay('No loans to repay');
+                    showNotification('No loans to repay', 'error');
+                    return;
+                }
+                
+                // Calculate interest (5% base + 1% per transaction after the first)
+                let interestRate = 0.05;
+                if (transactions > 1) {
+                    interestRate += (transactions - 1) * 0.01;
+                }
+                
+                // Find unpaid loans
+                const unpaidLoans = card.loans.filter(loan => !loan.paid);
+                
+                if (unpaidLoans.length === 0) {
+                    updateMessageDisplay('No unpaid loans found');
+                    showNotification('No unpaid loans found', 'error');
+                    return;
+                }
+                
+                // Calculate total repayment
+                const loanTotal = unpaidLoans.reduce((sum, loan) => sum + loan.amount, 0);
+                const interestAmount = Math.round(loanTotal * interestRate);
+                const totalRepayment = loanTotal + interestAmount;
+                
+                // Check for sufficient funds
+                if (totalRepayment > card.balance) {
+                    updateMessageDisplay('Insufficient funds to repay loans');
+                    showNotification('Insufficient funds', 'error');
+                    return;
+                }
+                
+                // Process repayment
+                card.balance -= totalRepayment;
+                
+                // Mark loans as paid
+                unpaidLoans.forEach(loan => {
+                    loan.paid = true;
+                    loan.repaidTimestamp = Date.now();
+                });
+                
+                // Reset transaction counter
+                card.transactions = 0;
+                
+                // Update display
+                displayCardInfo(cardId);
+                
+                // Show notification
+                const repaymentStr = formatAmount(totalRepayment);
+                const interestStr = formatAmount(interestAmount);
+                showNotification(`Repayment successful`);
+                updateMessageDisplay(`Repaid ${repaymentStr} (incl. ${interestStr} interest)`);
+                
+                // Save data
+                saveCardData();
+                
+                // Reset after delay
+                setTimeout(resetToIdle, 3000);
+                
+            } catch (error) {
+                console.error("Repayment error:", error);
+                updateMessageDisplay('Error processing repayment');
+                showNotification('Error processing repayment', 'error');
+            }
+        }
+        
+        // Mode Functions
+        function startTransferMode() {
+            resetToIdle();
+            currentMode = 'transfer_sender';
+            updateModeDisplay('Transfer');
+            updateMessageDisplay('Tap sender\'s card');
+        }
+        
+        function startBiddingMode() {
+            resetToIdle();
+            currentMode = 'bidding_card';
+            updateModeDisplay('Bidding');
+            updateMessageDisplay('Tap card of bidder');
+        }
+        
+        function startLoanMode() {
+            resetToIdle();
+            currentMode = 'loan_card';
+            updateModeDisplay('Loan');
+            updateMessageDisplay('Tap card to receive loan');
+        }
+        
+        function startRepayMode() {
+            resetToIdle();
+            currentMode = 'repay_card';
+            updateModeDisplay('Repay');
+            updateMessageDisplay('Tap card to repay loan');
+        }
+        
+        function resetToIdle() {
+            currentMode = 'idle';
+            updateModeDisplay('Idle');
+            updateBalanceDisplay(null);
+            updateMessageDisplay('Tap a card to begin');
+            hideInputArea();
+            
+            // Reset variables
+            currentCard = null;
+            senderCard = null;
+            receiverCard = null;
+            amount = 0;
+            baseBid = 0;
+            currentBid = 0;
+        }
+        
+        // Amount Input Functions
+        function handleNumpadInput(value) {
+            const currentAmount = amountDisplay.textContent.replace(/,/g, '');
+            
+            // Prevent adding too many digits
+            if (currentAmount.length >= 9 && currentAmount !== '0') {
+                return;
+            }
+            
+            let newAmount;
+            if (currentAmount === '0') {
+                newAmount = value;
+            } else {
+                newAmount = currentAmount + value;
+            }
+            
+            amountDisplay.textContent = formatDisplayAmount(newAmount);
+        }
+        
+        function clearAmount() {
+            amountDisplay.textContent = '0';
+        }
+        
+        function backspaceAmount() {
+            const currentAmount = amountDisplay.textContent.replace(/,/g, '');
+            if (currentAmount.length <= 1) {
+                amountDisplay.textContent = '0';
+            } else {
+                const newAmount = currentAmount.slice(0, -1);
+                amountDisplay.textContent = formatDisplayAmount(newAmount);
+            }
+        }
+        
+        function confirmAmount() {
+            try {
+                const enteredAmount = parseInt(amountDisplay.textContent.replace(/,/g, ''));
+                
+                if (isNaN(enteredAmount) || enteredAmount <= 0) {
+                    updateMessageDisplay('Please enter a valid amount');
+                    messageDisplay.classList.add('shake');
+                    setTimeout(() => {
+                        messageDisplay.classList.remove('shake');
+                    }, 500);
+                    return;
+                }
+                
+                amount = enteredAmount;
+                
+                switch (currentMode) {
+                    case 'transfer_amount':
+                        // Check if sender has enough funds
+                        if (amount > cards[senderCard].balance) {
+                            updateMessageDisplay('Insufficient funds');
+                            showNotification('Insufficient funds', 'error');
+                            return;
+                        }
+                        
+                        updateMessageDisplay('Tap receiver\'s card');
+                        currentMode = 'transfer_receiver';
+                        hideInputArea();
+                        break;
+                        
+                    case 'bidding_base':
+                        baseBid = amount;
+                        currentBid = amount;
+                        updateMessageDisplay('Adjust bid with increments');
+                        currentMode = 'bidding_increment';
+                        showInputArea('bidding');
+                        break;
+                        
+                    case 'loan_amount':
+                        processLoan();
+                        hideInputArea();
+                        break;
+                }
+                
+            } catch (error) {
+                console.error("Amount input error:", error);
+                updateMessageDisplay('Invalid amount');
+                showNotification('Invalid amount', 'error');
+            }
+        }
+        
+        // Bidding Functions
+        function addToBid(increment) {
+            currentBid += increment;
+            currentBidDisplay.textContent = `Current Bid: ${formatAmount(currentBid)}`;
+        }
+        
+        function resetBid() {
+            currentBid = baseBid;
+            currentBidDisplay.textContent = `Current Bid: ${formatAmount(baseBid)}`;
+        }
+        
+        function confirmBid() {
+            updateMessageDisplay('Tap card to confirm and pay bid');
+            currentMode = 'bidding_final';
+            hideInputArea();
+        }
+        
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize data
+            initializeCardData();
+            
+            // Card simulation buttons
+            document.getElementById('card1-btn').addEventListener('click', () => simulateCardTap('card1'));
+            document.getElementById('card2-btn').addEventListener('click', () => simulateCardTap('card2'));
+            
+            // Mode buttons
+            document.getElementById('transfer-btn').addEventListener('click', startTransferMode);
+            document.getElementById('bidding-btn').addEventListener('click', startBiddingMode);
+            document.getElementById('loan-btn').addEventListener('click', startLoanMode);
+            document.getElementById('repay-btn').addEventListener('click', startRepayMode);
+            document.getElementById('reset-btn').addEventListener('click', resetToIdle);
+            
+            // Keypad buttons
+            const numpadButtons = document.querySelectorAll('.numpad-btn');
+            numpadButtons.forEach(button => {
+                button.addEventListener('click', () => handleNumpadInput(button.textContent));
+            });
+            
+            document.getElementById('clear-btn').addEventListener('click', clearAmount);
+            document.getElementById('backspace-btn').addEventListener('click', backspaceAmount);
+            document.getElementById('confirm-amount-btn').addEventListener('click', confirmAmount);
+            
+            // Bidding buttons
+            const bidIncrementButtons = document.querySelectorAll('.bid-increment');
+            bidIncrementButtons.forEach(button => {
+                button.addEventListener('click', () => addToBid(parseInt(button.getAttribute('data-value'))));
+            });
+            
+            document.getElementById('reset-bid-btn').addEventListener('click', resetBid);
+            document.getElementById('confirm-bid-btn').addEventListener('click', confirmBid);
+        });
+    </script>
+</body>
+</html>
